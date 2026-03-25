@@ -1,0 +1,46 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id         Int      @id @default(autoincrement())
+  admin_id   String   @unique
+  public_key String   @db.Text
+}
+
+model Student {
+  id          Int             @id @default(autoincrement())
+  student_id  String          @unique
+  first_name  String
+  last_name   String
+  public_key  String          @db.Text
+  attendances AttendanceLog[]
+}
+
+model Schedule {
+  id             Int             @id @default(autoincrement())
+  lab_room       String
+  date           String
+  schedule       String
+  course_code    String
+  section        String
+  professor_name String
+  attendances    AttendanceLog[]
+}
+
+model AttendanceLog {
+  id          Int      @id @default(autoincrement())
+  student_id  String
+  schedule_id Int
+  timestamp   DateTime @default(now())
+  status      String   @default("ON_TIME")
+  signature   String   @db.Text
+
+  student     Student  @relation(fields: [student_id], references: [student_id])
+  schedule    Schedule @relation(fields: [schedule_id], references: [id])
+}

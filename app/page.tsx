@@ -1,65 +1,135 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState } from "react";
+import { set } from "idb-keyval";
+import { registerStudentToDatabase } from "./actions";
+
+export default function StudentRegistration() {
+  const [studentId, setStudentId] = useState<string>("");
+  const [firstName, setFirstName] = useState<string>("");
+  const [lastName, setLastName] = useState<string>("");
+  const [isRegistering, setIsRegistering] = useState<boolean>(false);
+  const [message, setMessage] = useState<string>("");
+  const [isError, setIsError] = useState<boolean>(false);
+
+  async function handleRegister(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setIsRegistering(true);
+    setMessage("");
+    setIsError(false);
+
+    try {
+      // Generate the ECC Key Pair (P-256 Curve)
+      const keyPair = await window.crypto.subtle.generateKey(
+        { name: "ECDSA", namedCurve: "P-256" },
+        false, 
+        ["sign", "verify"]
+      );
+
+      // Save private key and ID to the browser's IndexedDB
+      await set("student_private_key", keyPair.privateKey);
+      await set("student_id", studentId);
+
+      // Export public key to send to the database
+      const exportedPublicKey = await window.crypto.subtle.exportKey(
+        "spki",
+        keyPair.publicKey
+      );
+      
+      const publicKeyArray = Array.from(new Uint8Array(exportedPublicKey));
+      const publicKeyBase64 = btoa(String.fromCharCode(...publicKeyArray));
+
+      const dbResponse = await registerStudentToDatabase({
+        studentId: studentId,
+        firstName: firstName,
+        lastName: lastName,
+        publicKey: publicKeyBase64,
+      });
+
+      if (dbResponse.success) {
+        setMessage(dbResponse.message);
+        setStudentId("");
+        setFirstName("");
+        setLastName("");
+      } else {
+        setIsError(true);
+        setMessage(dbResponse.message);
+      }
+
+    } catch (error) {
+      console.error("Registration failed:", error);
+      setIsError(true);
+      setMessage("An error occurred during secure key generation.");
+    } finally {
+      setIsRegistering(false);
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="min-h-[80vh] flex items-center justify-center p-4">
+      <div className="bg-white w-full max-w-md rounded-2xl shadow-xl p-8 border border-gray-100">
+        
+        <div className="text-center mb-8">
+          <h2 className="text-3xl font-bold text-gray-800 tracking-tight">Student Registration</h2>
+          <p className="text-gray-500 mt-2 text-sm">Register your device to enable secure attendance tracking.</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+        
+        <form onSubmit={handleRegister} className="space-y-5">
+          <div>
+            <label htmlFor="studentId" className="block text-sm font-semibold text-gray-700 mb-1">Student ID</label>
+            <input
+              type="text"
+              id="studentId"
+              className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+              placeholder="e.g. 2024-12345"
+              value={studentId}
+              onChange={(e) => setStudentId(e.target.value)}
+              required
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+          </div>
+
+          <div>
+            <label htmlFor="firstName" className="block text-sm font-semibold text-gray-700 mb-1">First Name</label>
+            <input
+              type="text"
+              id="firstName"
+              className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+              placeholder="Juan"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="lastName" className="block text-sm font-semibold text-gray-700 mb-1">Last Name</label>
+            <input
+              type="text"
+              id="lastName"
+              className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+              placeholder="Dela Cruz"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              required
+            />
+          </div>
+
+          <button 
+            type="submit" 
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-colors shadow-md disabled:bg-blue-400 mt-2"
+            disabled={isRegistering}
           >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+            {isRegistering ? "Registering Device..." : "Register Device"}
+          </button>
+        </form>
+
+        {message && (
+          <div className={`mt-6 p-4 rounded-lg text-sm font-medium ${isError ? "bg-red-50 text-red-700 border border-red-200" : "bg-green-50 text-green-700 border border-green-200"}`}>
+            {message}
+          </div>
+        )}
+
+      </div>
+    </main>
   );
 }
