@@ -1,6 +1,6 @@
 "use server";
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
@@ -40,20 +40,26 @@ export async function registerStudentToDatabase(data: {
     const hashedPin = await bcrypt.hash(data.recoveryPin, salt);
 
     if (existingStudent) {
-      // If the public key is empty, it means the device was revoked and they can register a new one.
+      // If the public key is empty, the device was revoked and they can register a new one.
       if (existingStudent.public_key === "") {
         await prisma.student.update({
           where: { student_id: data.studentId },
           data: {
-            first_name: data.firstName,
-            last_name: data.lastName,
+            // Intentionally excluding first_name and last_name to prevent identity tampering
             public_key: data.publicKey,
             recovery_pin: hashedPin,
           },
         });
-        return { success: true, message: "New device registered successfully. Your old attendance history was kept safe." };
+
+        return {
+          success: true,
+          message: `Welcome back, ${existingStudent.first_name}! New device registered successfully.`,
+        };
       } else {
-        return { success: false, message: "Student ID is already registered to an active device." };
+        return {
+          success: false,
+          message: "Student ID is already registered to an active device.",
+        };
       }
     }
 
@@ -77,7 +83,7 @@ export async function registerStudentToDatabase(data: {
 export async function recoverStudentDevice(studentId: string, pin: string) {
   try {
     const student = await prisma.student.findUnique({
-      where: { student_id: studentId }
+      where: { student_id: studentId },
     });
 
     if (!student) {
@@ -95,12 +101,14 @@ export async function recoverStudentDevice(studentId: string, pin: string) {
       where: { student_id: studentId },
       data: {
         public_key: "",
-        recovery_pin: ""
-      }
+        recovery_pin: "",
+      },
     });
 
-    return { success: true, message: "Device access revoked. You may now register your new device." };
-
+    return {
+      success: true,
+      message: "Device access revoked. You may now register your new device.",
+    };
   } catch (error) {
     console.error("Recovery error:", error);
     return { success: false, message: "Failed to process recovery request." };
@@ -111,9 +119,9 @@ export async function getLabRooms() {
   try {
     const schedules = await prisma.schedule.findMany({
       select: { lab_room: true },
-      distinct: ['lab_room'],
+      distinct: ["lab_room"],
     });
-    const rooms = schedules.map(s => s.lab_room);
+    const rooms = schedules.map((s) => s.lab_room);
     return { success: true, data: rooms };
   } catch (error) {
     console.error(error);
@@ -124,7 +132,7 @@ export async function getLabRooms() {
 function convertTimeToMinutes(timeStr: string) {
   // Removes all spaces and forces uppercase so "4:10PM" and " 04:10 PM " become identical
   const cleanStr = timeStr.replace(/\s+/g, "").toUpperCase();
-  
+
   // Extracts the hours, minutes, and AM/PM regardless of formatting
   const match = cleanStr.match(/(\d+):(\d+)(AM|PM)/);
   if (!match) return 0;
@@ -132,13 +140,13 @@ function convertTimeToMinutes(timeStr: string) {
   let hours = parseInt(match[1], 10);
   const minutes = parseInt(match[2], 10);
   const modifier = match[3];
-  
+
   if (hours === 12) {
     hours = modifier === "AM" ? 0 : 12;
   } else if (modifier === "PM") {
     hours += 12;
   }
-  
+
   return hours * 60 + minutes;
 }
 
@@ -154,18 +162,35 @@ export async function submitAttendance(data: {
     });
 
     if (!student) {
-      return { success: false, message: "Student not found in the database. Please register." };
+      return {
+        success: false,
+        message: "Student not found in the database. Please register.",
+      };
     }
 
     if (!student.public_key || student.public_key === "") {
-      return { success: false, message: "DEVICE_REVOKED: Your device access has been revoked. Please re-register." };
+      return {
+        success: false,
+        message:
+          "DEVICE_REVOKED: Your device access has been revoked. Please re-register.",
+      };
     }
 
     const encoder = new TextEncoder();
-    const encodedMessage = encoder.encode(`${data.studentId}-${data.labRoom}-${data.timestamp}`);
-    
-    const binarySignature = new Uint8Array(atob(data.signature).split("").map(c => c.charCodeAt(0)));
-    const binaryPublicKey = new Uint8Array(atob(student.public_key).split("").map(c => c.charCodeAt(0)));
+    const encodedMessage = encoder.encode(
+      `${data.studentId}-${data.labRoom}-${data.timestamp}`,
+    );
+
+    const binarySignature = new Uint8Array(
+      atob(data.signature)
+        .split("")
+        .map((c) => c.charCodeAt(0)),
+    );
+    const binaryPublicKey = new Uint8Array(
+      atob(student.public_key)
+        .split("")
+        .map((c) => c.charCodeAt(0)),
+    );
 
     // FIX 1: Added globalThis to prevent Node.js crashes
     const importedPublicKey = await globalThis.crypto.subtle.importKey(
@@ -173,7 +198,7 @@ export async function submitAttendance(data: {
       binaryPublicKey,
       { name: "ECDSA", namedCurve: "P-256" },
       true,
-      ["verify"]
+      ["verify"],
     );
 
     // FIX 1: Added globalThis here as well
@@ -181,20 +206,23 @@ export async function submitAttendance(data: {
       { name: "ECDSA", hash: { name: "SHA-256" } },
       importedPublicKey,
       binarySignature,
-      encodedMessage
+      encodedMessage,
     );
 
     if (!isValid) {
-      return { success: false, message: "Digital signature verification failed." };
+      return {
+        success: false,
+        message: "Digital signature verification failed.",
+      };
     }
 
     const now = new Date();
-    const phTimeFormatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Asia/Manila',
-      weekday: 'long',
-      hour: 'numeric',
-      minute: 'numeric',
-      hour12: false
+    const phTimeFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Manila",
+      weekday: "long",
+      hour: "numeric",
+      minute: "numeric",
+      hour12: false,
     });
 
     const timeParts = phTimeFormatter.formatToParts(now);
@@ -203,18 +231,18 @@ export async function submitAttendance(data: {
     let currentMinute = 0;
 
     for (const part of timeParts) {
-      if (part.type === 'weekday') currentDay = part.value;
-      if (part.type === 'hour') currentHour = parseInt(part.value);
-      if (part.type === 'minute') currentMinute = parseInt(part.value);
+      if (part.type === "weekday") currentDay = part.value;
+      if (part.type === "hour") currentHour = parseInt(part.value);
+      if (part.type === "minute") currentMinute = parseInt(part.value);
     }
 
-    const currentMinutesSinceMidnight = (currentHour * 60) + currentMinute;
+    const currentMinutesSinceMidnight = currentHour * 60 + currentMinute;
 
     const activeSchedules = await prisma.schedule.findMany({
       where: {
         lab_room: data.labRoom,
-        date: currentDay
-      }
+        date: currentDay,
+      },
     });
 
     let matchedScheduleId = null;
@@ -223,7 +251,7 @@ export async function submitAttendance(data: {
     for (const sched of activeSchedules) {
       // FIX 2: Bulletproof splitting for schedules.json formatting
       const [startStr, endStr] = sched.schedule.split(/\s*-\s*/);
-      
+
       if (!startStr || !endStr) continue;
 
       const classStartMins = convertTimeToMinutes(startStr);
@@ -231,10 +259,13 @@ export async function submitAttendance(data: {
 
       const allowedStartMins = classStartMins - 15;
 
-      if (currentMinutesSinceMidnight >= allowedStartMins && currentMinutesSinceMidnight <= classEndMins) {
+      if (
+        currentMinutesSinceMidnight >= allowedStartMins &&
+        currentMinutesSinceMidnight <= classEndMins
+      ) {
         matchedScheduleId = sched.id;
-        
-        if (currentMinutesSinceMidnight > (classStartMins + 15)) {
+
+        if (currentMinutesSinceMidnight > classStartMins + 15) {
           attendanceStatus = "LATE";
         }
         break;
@@ -242,28 +273,29 @@ export async function submitAttendance(data: {
     }
 
     if (!matchedScheduleId) {
-      return { 
-        success: false, 
-        message: "Error: No active class session found for you in this room at this current time." 
+      return {
+        success: false,
+        message:
+          "Error: No active class session found for you in this room at this current time.",
       };
     }
 
     const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
-    
+
     const existingLog = await prisma.attendanceLog.findFirst({
       where: {
         student_id: data.studentId,
         schedule_id: matchedScheduleId,
         timestamp: {
-          gte: twelveHoursAgo
-        }
-      }
+          gte: twelveHoursAgo,
+        },
+      },
     });
 
     if (existingLog) {
-      return { 
-        success: false, 
-        message: "Attendance already recorded for this session today." 
+      return {
+        success: false,
+        message: "Attendance already recorded for this session today.",
       };
     }
 
@@ -277,14 +309,16 @@ export async function submitAttendance(data: {
       },
     });
 
-    return { 
-      success: true, 
-      message: `Attendance securely recorded. Status: ${attendanceStatus}` 
+    return {
+      success: true,
+      message: `Attendance securely recorded. Status: ${attendanceStatus}`,
     };
-
   } catch (error) {
     console.error("Attendance submission error:", error);
-    return { success: false, message: "Server error while processing attendance." };
+    return {
+      success: false,
+      message: "Server error while processing attendance.",
+    };
   }
 }
 
@@ -292,15 +326,12 @@ export async function getAdminData() {
   try {
     const logs = await prisma.attendanceLog.findMany({
       include: { student: true, schedule: true },
-      orderBy: { timestamp: 'desc' }
+      orderBy: { timestamp: "desc" },
     });
     const students = await prisma.student.findMany();
     // Fetch the schedules to display in the new viewer
     const schedules = await prisma.schedule.findMany({
-      orderBy: [
-        { lab_room: 'asc' },
-        { date: 'asc' }
-      ]
+      orderBy: [{ lab_room: "asc" }, { date: "asc" }],
     });
     return { success: true, logs, students, schedules };
   } catch (error) {
@@ -316,10 +347,13 @@ export async function resetStudentDevice(studentId: string) {
       where: { student_id: studentId },
       data: {
         public_key: "",
-        recovery_pin: ""
-      }
+        recovery_pin: "",
+      },
     });
-    return { success: true, message: "Student device access revoked successfully." };
+    return {
+      success: true,
+      message: "Student device access revoked successfully.",
+    };
   } catch (error) {
     console.error(error);
     return { success: false, message: "Failed to reset student device." };
@@ -346,8 +380,11 @@ export async function registerAdminToDatabase(data: {
     return { success: true, message: "Admin device securely registered." };
   } catch (error) {
     const err = error as { code?: string };
-    if (err.code === 'P2002') {
-      return { success: false, message: "This Admin ID is already registered." };
+    if (err.code === "P2002") {
+      return {
+        success: false,
+        message: "This Admin ID is already registered.",
+      };
     }
     console.error(error);
     return { success: false, message: "Failed to connect to the database." };
@@ -361,35 +398,43 @@ export async function verifyAdminSignature(data: {
 }) {
   try {
     const admin = await prisma.admin.findUnique({
-      where: { admin_id: data.adminId }
+      where: { admin_id: data.adminId },
     });
 
     if (!admin) {
       return { success: false, message: "Admin profile not found." };
     }
 
-    const publicKeyArray = Uint8Array.from(atob(admin.public_key), c => c.charCodeAt(0));
+    const publicKeyArray = Uint8Array.from(atob(admin.public_key), (c) =>
+      c.charCodeAt(0),
+    );
     const importedPublicKey = await globalThis.crypto.subtle.importKey(
       "spki",
       publicKeyArray,
       { name: "ECDSA", namedCurve: "P-256" },
       true,
-      ["verify"]
+      ["verify"],
     );
 
     const signedMessage = `ADMIN-LOGIN-${data.adminId}-${data.timestamp}`;
     const encoder = new TextEncoder();
     const messageData = encoder.encode(signedMessage);
-    const signatureArray = Uint8Array.from(atob(data.signature), c => c.charCodeAt(0));
+    const signatureArray = Uint8Array.from(atob(data.signature), (c) =>
+      c.charCodeAt(0),
+    );
 
     const isValid = await globalThis.crypto.subtle.verify(
       { name: "ECDSA", hash: { name: "SHA-256" } },
       importedPublicKey,
       signatureArray,
-      messageData
+      messageData,
     );
 
-    if (!isValid) return { success: false, message: "Security Error: Invalid admin signature." };
+    if (!isValid)
+      return {
+        success: false,
+        message: "Security Error: Invalid admin signature.",
+      };
 
     return { success: true, message: "Admin identity verified." };
   } catch (error) {
@@ -424,14 +469,17 @@ export async function createSchedule(data: {
   }
 }
 
-export async function updateSchedule(id: number, data: {
-  lab_room: string;
-  date: string;
-  schedule: string;
-  course_code: string;
-  section: string;
-  professor_name: string;
-}) {
+export async function updateSchedule(
+  id: number,
+  data: {
+    lab_room: string;
+    date: string;
+    schedule: string;
+    course_code: string;
+    section: string;
+    professor_name: string;
+  },
+) {
   try {
     await prisma.schedule.update({
       where: { id: id },
@@ -474,7 +522,10 @@ export async function manualAttendanceOverride(data: {
     });
 
     if (!student) {
-      return { success: false, message: "Student ID not found in the database." };
+      return {
+        success: false,
+        message: "Student ID not found in the database.",
+      };
     }
 
     const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
@@ -483,13 +534,16 @@ export async function manualAttendanceOverride(data: {
         student_id: data.studentId,
         schedule_id: data.scheduleId,
         timestamp: {
-          gte: twelveHoursAgo
-        }
-      }
+          gte: twelveHoursAgo,
+        },
+      },
     });
 
     if (existingLog) {
-      return { success: false, message: "Student already has an attendance record for this session." };
+      return {
+        success: false,
+        message: "Student already has an attendance record for this session.",
+      };
     }
 
     await prisma.attendanceLog.create({
@@ -497,11 +551,14 @@ export async function manualAttendanceOverride(data: {
         student_id: data.studentId,
         schedule_id: data.scheduleId,
         status: data.status,
-        signature: "MANUAL_ADMIN_OVERRIDE", 
+        signature: "MANUAL_ADMIN_OVERRIDE",
       },
     });
 
-    return { success: true, message: `Manual override successful. Student marked as ${data.status.replace("_", " ")}.` };
+    return {
+      success: true,
+      message: `Manual override successful. Student marked as ${data.status.replace("_", " ")}.`,
+    };
   } catch (error) {
     console.error("Manual override error:", error);
     return { success: false, message: "Server error during manual override." };
