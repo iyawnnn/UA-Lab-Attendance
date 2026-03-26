@@ -4,23 +4,18 @@ import { useState, useEffect } from "react";
 import { get, set, del } from "idb-keyval";
 import { registerStudentToDatabase, getLabRooms, submitAttendance } from "../actions";
 
-
 export default function SmartStudentPortal() {
-  // Navigation State
   const [view, setView] = useState<"loading" | "register" | "attendance">("loading");
-  
-  // Registration State
+
   const [studentId, setStudentId] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [isRegistering, setIsRegistering] = useState(false);
 
-  // Attendance State
   const [labRooms, setLabRooms] = useState<string[]>([]);
   const [selectedRoom, setSelectedRoom] = useState("");
   const [isLogging, setIsLogging] = useState(false);
 
-  // Shared State
   const [message, setMessage] = useState("");
   const [isError, setIsError] = useState(false);
 
@@ -51,19 +46,18 @@ export default function SmartStudentPortal() {
     setIsError(false);
 
     try {
+      // 1. Generate keys first, but DO NOT save them to the browser vault yet.
       const keyPair = await window.crypto.subtle.generateKey(
         { name: "ECDSA", namedCurve: "P-256" },
         false, 
         ["sign", "verify"]
       );
 
-      await set("student_private_key", keyPair.privateKey);
-      await set("student_id", studentId);
-
       const exportedPublicKey = await window.crypto.subtle.exportKey("spki", keyPair.publicKey);
       const publicKeyArray = Array.from(new Uint8Array(exportedPublicKey));
       const publicKeyBase64 = btoa(String.fromCharCode(...publicKeyArray));
 
+      // 2. Send to the server database FIRST.
       const dbResponse = await registerStudentToDatabase({
         studentId,
         firstName,
@@ -71,7 +65,11 @@ export default function SmartStudentPortal() {
         publicKey: publicKeyBase64,
       });
 
+      // 3. ONLY save to the browser vault if the database says SUCCESS.
       if (dbResponse.success) {
+        await set("student_private_key", keyPair.privateKey);
+        await set("student_id", studentId);
+
         setMessage("Device registered successfully!");
         setTimeout(() => {
           setMessage("");
@@ -85,7 +83,8 @@ export default function SmartStudentPortal() {
     } catch (error) {
       console.error(error);
       setIsError(true);
-      setMessage("Error generating security keys.");
+      // Updated message to be more accurate
+      setMessage("Server Error: Database connection failed. Keys were NOT saved.");
     } finally {
       setIsRegistering(false);
     }
@@ -130,14 +129,13 @@ export default function SmartStudentPortal() {
         signature: signatureBase64
       });
 
-if (response.success) {
+      if (response.success) {
         setMessage(response.message);
       } else {
         setIsError(true);
         setMessage(response.message);
-        
-        // If the server says the student is missing from the database, 
-        // clear the browser vault and send them back to the register screen.
+
+        // AUTO-HEAL: If the server says the student is missing, clear the browser vault automatically.
         if (response.message.includes("Student not found")) {
           await del("student_private_key");
           await del("student_id");
@@ -166,7 +164,6 @@ if (response.success) {
     <main className="min-h-screen flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-md rounded-2xl shadow-xl p-8 border border-gray-100 relative">
         
-        {/* Simple navigation back to home */}
         <a href="/" className="absolute top-6 left-6 text-sm text-gray-400 hover:text-blue-600 transition-colors">
           &larr; Home
         </a>
