@@ -104,10 +104,17 @@ export async function getLabRooms() {
   }
 }
 
-// Helper function to convert "07:30 AM" into minutes for easy math comparison
 function convertTimeToMinutes(timeStr: string) {
-  const [time, modifier] = timeStr.trim().split(" ");
-  let [hours, minutes] = time.split(":").map(Number);
+  // Removes all spaces and forces uppercase so "4:10PM" and " 04:10 PM " become identical
+  const cleanStr = timeStr.replace(/\s+/g, "").toUpperCase();
+  
+  // Extracts the hours, minutes, and AM/PM regardless of formatting
+  const match = cleanStr.match(/(\d+):(\d+)(AM|PM)/);
+  if (!match) return 0;
+
+  let hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  const modifier = match[3];
   
   if (hours === 12) {
     hours = modifier === "AM" ? 0 : 12;
@@ -212,14 +219,34 @@ export async function submitAttendance(data: {
       }
     }
 
-    if (!matchedScheduleId) {
+if (!matchedScheduleId) {
       return { 
         success: false, 
         message: "Error: No active class session found for you in this room at this current time." 
       };
     }
 
-    // 3. Save the Verified and Time-Checked Record
+    // 3. ANTI-SPAM CHECK: Prevent duplicate logs for the same session today
+    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+    
+    const existingLog = await prisma.attendanceLog.findFirst({
+      where: {
+        student_id: data.studentId,
+        schedule_id: matchedScheduleId,
+        timestamp: {
+          gte: twelveHoursAgo
+        }
+      }
+    });
+
+    if (existingLog) {
+      return { 
+        success: false, 
+        message: "Attendance already recorded for this session today." 
+      };
+    }
+
+    // 4. Save the Verified and Time-Checked Record
     await prisma.attendanceLog.create({
       data: {
         student_id: data.studentId,

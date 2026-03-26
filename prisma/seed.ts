@@ -1,43 +1,41 @@
 import { PrismaClient } from '@prisma/client';
-import schedulesData from '../schedules.json';
+import fs from 'fs';
+import path from 'path';
 
 const prisma = new PrismaClient();
 
-interface ScheduleRecord {
-  id: number;
-  lab_room: string;
-  date: string;
-  schedule: string;
-  course_code: string;
-  section: string;
-  professor_name: string;
-}
-
 async function main() {
-  console.log('Starting the seeding process...');
+  console.log('Reading schedules.json...');
+  
+  // 1. Locate and read the JSON file
+  const schedulesPath = path.join(process.cwd(), 'schedules.json');
+  const schedulesData = JSON.parse(fs.readFileSync(schedulesPath, 'utf-8'));
 
-  // The mapping uses the new interface to guarantee data safety
-  const formattedSchedules = schedulesData.map((s: ScheduleRecord) => ({
-    id: s.id,
-    lab_room: s.lab_room,
-    date: s.date,
-    schedule: s.schedule,
-    course_code: s.course_code,
-    section: s.section,
-    professor_name: s.professor_name
-  }));
+  console.log(`Found ${schedulesData.length} schedules. Migrating to database...`);
 
-  const result = await prisma.schedule.createMany({
-    data: formattedSchedules,
-    skipDuplicates: true,
-  });
+  // 2. Delete any leftover schedules just to be safe
+  await prisma.schedule.deleteMany();
 
-  console.log(`Successfully added ${result.count} schedules to Aiven!`);
+  // 3. Loop through the JSON and create records in the database
+  for (const sched of schedulesData) {
+    await prisma.schedule.create({
+      data: {
+        lab_room: sched.lab_room,
+        date: sched.date,
+        schedule: sched.schedule,
+        course_code: sched.course_code,
+        section: sched.section,
+        professor_name: sched.professor_name,
+      },
+    });
+  }
+
+  console.log('✅ Seeding completed successfully! Your schedules are back online.');
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error('Error during seeding:', e);
     process.exit(1);
   })
   .finally(async () => {
