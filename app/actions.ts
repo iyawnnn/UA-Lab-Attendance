@@ -169,10 +169,17 @@ export async function getAdminData() {
       orderBy: { timestamp: 'desc' }
     });
     const students = await prisma.student.findMany();
-    return { success: true, logs, students };
+    // Fetch the schedules to display in the new viewer
+    const schedules = await prisma.schedule.findMany({
+      orderBy: [
+        { lab_room: 'asc' },
+        { date: 'asc' }
+      ]
+    });
+    return { success: true, logs, students, schedules };
   } catch (error) {
     console.error(error);
-    return { success: false, logs: [], students: [] };
+    return { success: false, logs: [], students: [], schedules: [] };
   }
 }
 
