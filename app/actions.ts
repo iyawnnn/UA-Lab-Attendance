@@ -36,13 +36,26 @@ export async function registerStudentToDatabase(data: {
       where: { student_id: data.studentId },
     });
 
-    if (existingStudent) {
-      return { success: false, message: "Student ID is already registered to a device." };
-    }
-
-    // Hash the PIN before saving to database
     const salt = await bcrypt.genSalt(10);
     const hashedPin = await bcrypt.hash(data.recoveryPin, salt);
+
+    if (existingStudent) {
+      // If the public key is empty, it means the device was revoked and they can register a new one.
+      if (existingStudent.public_key === "") {
+        await prisma.student.update({
+          where: { student_id: data.studentId },
+          data: {
+            first_name: data.firstName,
+            last_name: data.lastName,
+            public_key: data.publicKey,
+            recovery_pin: hashedPin,
+          },
+        });
+        return { success: true, message: "New device registered successfully. Your old attendance history was kept safe." };
+      } else {
+        return { success: false, message: "Student ID is already registered to an active device." };
+      }
+    }
 
     await prisma.student.create({
       data: {
@@ -77,9 +90,13 @@ export async function recoverStudentDevice(studentId: string, pin: string) {
       return { success: false, message: "Incorrect Recovery PIN." };
     }
 
-    // PIN is correct, delete the old record so they can register their new phone
-    await prisma.student.delete({
-      where: { student_id: studentId }
+    // Instead of deleting, we just wipe the keys to keep their attendance history safe
+    await prisma.student.update({
+      where: { student_id: studentId },
+      data: {
+        public_key: "",
+        recovery_pin: ""
+      }
     });
 
     return { success: true, message: "Device access revoked. You may now register your new device." };
@@ -140,14 +157,18 @@ export async function submitAttendance(data: {
       return { success: false, message: "Student not found in the database. Please register." };
     }
 
-    // 1. Cryptographic Verification (Your existing security)
+    if (!student.public_key || student.public_key === "") {
+      return { success: false, message: "DEVICE_REVOKED: Your device access has been revoked. Please re-register." };
+    }
+
     const encoder = new TextEncoder();
     const encodedMessage = encoder.encode(`${data.studentId}-${data.labRoom}-${data.timestamp}`);
     
     const binarySignature = new Uint8Array(atob(data.signature).split("").map(c => c.charCodeAt(0)));
     const binaryPublicKey = new Uint8Array(atob(student.public_key).split("").map(c => c.charCodeAt(0)));
 
-    const importedPublicKey = await crypto.subtle.importKey(
+    // FIX 1: Added globalThis to prevent Node.js crashes
+    const importedPublicKey = await globalThis.crypto.subtle.importKey(
       "spki",
       binaryPublicKey,
       { name: "ECDSA", namedCurve: "P-256" },
@@ -155,7 +176,8 @@ export async function submitAttendance(data: {
       ["verify"]
     );
 
-    const isValid = await crypto.subtle.verify(
+    // FIX 1: Added globalThis here as well
+    const isValid = await globalThis.crypto.subtle.verify(
       { name: "ECDSA", hash: { name: "SHA-256" } },
       importedPublicKey,
       binarySignature,
@@ -166,7 +188,6 @@ export async function submitAttendance(data: {
       return { success: false, message: "Digital signature verification failed." };
     }
 
-    // 2. Time-Fencing Logic (Philippine Standard Time)
     const now = new Date();
     const phTimeFormatter = new Intl.DateTimeFormat('en-US', {
       timeZone: 'Asia/Manila',
@@ -189,7 +210,6 @@ export async function submitAttendance(data: {
 
     const currentMinutesSinceMidnight = (currentHour * 60) + currentMinute;
 
-    // Fetch schedules for this specific room and today's day
     const activeSchedules = await prisma.schedule.findMany({
       where: {
         lab_room: data.labRoom,
@@ -201,17 +221,19 @@ export async function submitAttendance(data: {
     let attendanceStatus = "ON_TIME";
 
     for (const sched of activeSchedules) {
-      const [startStr, endStr] = sched.schedule.split(" - ");
+      // FIX 2: Bulletproof splitting for schedules.json formatting
+      const [startStr, endStr] = sched.schedule.split(/\s*-\s*/);
+      
+      if (!startStr || !endStr) continue;
+
       const classStartMins = convertTimeToMinutes(startStr);
       const classEndMins = convertTimeToMinutes(endStr);
 
-      // We allow them to log in 15 minutes before the class starts
       const allowedStartMins = classStartMins - 15;
 
       if (currentMinutesSinceMidnight >= allowedStartMins && currentMinutesSinceMidnight <= classEndMins) {
         matchedScheduleId = sched.id;
         
-        // If they log in 16 or more minutes after the class start time, mark as late
         if (currentMinutesSinceMidnight > (classStartMins + 15)) {
           attendanceStatus = "LATE";
         }
@@ -219,14 +241,13 @@ export async function submitAttendance(data: {
       }
     }
 
-if (!matchedScheduleId) {
+    if (!matchedScheduleId) {
       return { 
         success: false, 
         message: "Error: No active class session found for you in this room at this current time." 
       };
     }
 
-    // 3. ANTI-SPAM CHECK: Prevent duplicate logs for the same session today
     const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
     
     const existingLog = await prisma.attendanceLog.findFirst({
@@ -252,6 +273,7 @@ if (!matchedScheduleId) {
         student_id: data.studentId,
         schedule_id: matchedScheduleId,
         status: attendanceStatus,
+        signature: data.signature,
       },
     });
 
@@ -289,13 +311,18 @@ export async function getAdminData() {
 
 export async function resetStudentDevice(studentId: string) {
   try {
-    await prisma.student.delete({
-      where: { student_id: studentId }
+    // Again, we just wipe the keys instead of deleting the student
+    await prisma.student.update({
+      where: { student_id: studentId },
+      data: {
+        public_key: "",
+        recovery_pin: ""
+      }
     });
-    return { success: true, message: "Student device reset successfully." };
+    return { success: true, message: "Student device access revoked successfully." };
   } catch (error) {
     console.error(error);
-    return { success: false, message: "Failed to reset device." };
+    return { success: false, message: "Failed to reset student device." };
   }
 }
 
