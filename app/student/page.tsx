@@ -262,10 +262,11 @@ export default function SmartStudentPortal() {
               <input
                 type="text"
                 placeholder="Student ID"
-                className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 outline-none"
+                className={`w-full px-4 py-3 rounded-lg border outline-none ${isNameLocked ? "bg-gray-200 text-gray-500 cursor-not-allowed border-transparent" : "bg-gray-50 border-gray-200"}`}
                 value={studentId}
                 onChange={(e) => setStudentId(e.target.value)}
                 onBlur={() => handleIdCheck()}
+                disabled={isNameLocked}
                 required
               />
               <input
@@ -306,6 +307,25 @@ export default function SmartStudentPortal() {
                 {isRegistering ? "Registering..." : "Register Device"}
               </button>
             </form>
+
+            {isNameLocked && (
+              <div className="text-center mt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsNameLocked(false);
+                    setStudentId("");
+                    setFirstName("");
+                    setLastName("");
+                    setMessage("");
+                  }}
+                  className="text-xs text-gray-400 hover:text-blue-600 underline"
+                >
+                  Not your account? Clear and try again
+                </button>
+              </div>
+            )}
+
             <div className="mt-6 text-center">
               <button
                 onClick={() => {
