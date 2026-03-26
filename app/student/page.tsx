@@ -49,9 +49,12 @@ export default function SmartStudentPortal() {
     }
   }
 
-  async function handleIdCheck() {
-    if (studentId.length >= 4) {
-      const response = await checkRevokedStatus(studentId);
+  async function handleIdCheck(forcedId?: string) {
+    // Use the forcedId if provided, otherwise use the state studentId
+    const idToSearch = typeof forcedId === "string" ? forcedId : studentId;
+
+    if (idToSearch.length >= 4) {
+      const response = await checkRevokedStatus(idToSearch);
       if (response.isRevoked) {
         setFirstName(response.firstName || "");
         setLastName(response.lastName || "");
@@ -204,10 +207,15 @@ export default function SmartStudentPortal() {
 
       if (response.success) {
         setMessage(response.message);
+
+        // 1. Fetch the identity and lock the fields immediately BEFORE the screen changes
+        await handleIdCheck(studentId);
+
         setTimeout(() => {
           setMessage("");
-          setStudentId("");
+          // 2. We deliberately DO NOT clear the studentId here so it stays in the box
           setRecoveryPin("");
+          // 3. Switch back to the register screen
           setView("register");
         }, 2000);
       } else {
@@ -257,7 +265,7 @@ export default function SmartStudentPortal() {
                 className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 outline-none"
                 value={studentId}
                 onChange={(e) => setStudentId(e.target.value)}
-                onBlur={handleIdCheck}
+                onBlur={() => handleIdCheck()}
                 required
               />
               <input
