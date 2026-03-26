@@ -7,6 +7,7 @@ import {
   getLabRooms,
   submitAttendance,
   recoverStudentDevice,
+  checkRevokedStatus,
 } from "../actions";
 
 export default function SmartStudentPortal() {
@@ -55,7 +56,9 @@ export default function SmartStudentPortal() {
         setFirstName(response.firstName || "");
         setLastName(response.lastName || "");
         setIsNameLocked(true); // Lock the fields
-        setMessage("Account found. Please enter a new PIN to register this device.");
+        setMessage(
+          "Account found. Please enter a new PIN to register this device.",
+        );
         setIsError(false);
       } else {
         setIsNameLocked(false); // Unlock for new users
@@ -248,32 +251,32 @@ export default function SmartStudentPortal() {
               </p>
             </div>
             <form onSubmit={handleRegister} className="space-y-4">
-              <input 
-                type="text" 
-                placeholder="Student ID" 
-                className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 outline-none" 
-                value={studentId} 
-                onChange={(e) => setStudentId(e.target.value)} 
+              <input
+                type="text"
+                placeholder="Student ID"
+                className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 outline-none"
+                value={studentId}
+                onChange={(e) => setStudentId(e.target.value)}
                 onBlur={handleIdCheck}
-                required 
+                required
               />
-              <input 
-                type="text" 
-                placeholder="First Name" 
-                className={`w-full px-4 py-3 rounded-lg border outline-none ${isNameLocked ? 'bg-gray-200 text-gray-500 cursor-not-allowed border-transparent' : 'bg-gray-50 border-gray-200'}`} 
-                value={firstName} 
-                onChange={(e) => setFirstName(e.target.value)} 
+              <input
+                type="text"
+                placeholder="First Name"
+                className={`w-full px-4 py-3 rounded-lg border outline-none ${isNameLocked ? "bg-gray-200 text-gray-500 cursor-not-allowed border-transparent" : "bg-gray-50 border-gray-200"}`}
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
                 disabled={isNameLocked}
-                required 
+                required
               />
-              <input 
-                type="text" 
-                placeholder="Last Name" 
-                className={`w-full px-4 py-3 rounded-lg border outline-none ${isNameLocked ? 'bg-gray-200 text-gray-500 cursor-not-allowed border-transparent' : 'bg-gray-50 border-gray-200'}`}  
-                value={lastName} 
-                onChange={(e) => setLastName(e.target.value)} 
+              <input
+                type="text"
+                placeholder="Last Name"
+                className={`w-full px-4 py-3 rounded-lg border outline-none ${isNameLocked ? "bg-gray-200 text-gray-500 cursor-not-allowed border-transparent" : "bg-gray-50 border-gray-200"}`}
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
                 disabled={isNameLocked}
-                required 
+                required
               />
               <input
                 type="password"
