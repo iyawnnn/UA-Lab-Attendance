@@ -193,7 +193,7 @@ export default function AdminDashboard() {
 
       <div className="max-w-7xl mx-auto px-8">
         {activeTab === "attendance" && <AttendanceTab logs={logs} />}
-        {activeTab === "schedules" && <SchedulesTab schedules={schedules} />}
+        {activeTab === "schedules" && <SchedulesTab schedules={schedules} refreshData={fetchDashboardData} />}
         {activeTab === "devices" && <DevicesTab students={students} onResetDevice={handleResetDevice} isLoading={isLoading} />}
       </div>
     </main>

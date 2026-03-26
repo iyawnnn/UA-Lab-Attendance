@@ -397,3 +397,113 @@ export async function verifyAdminSignature(data: {
     return { success: false, message: "Server error during verification." };
   }
 }
+
+export async function createSchedule(data: {
+  lab_room: string;
+  date: string;
+  schedule: string;
+  course_code: string;
+  section: string;
+  professor_name: string;
+}) {
+  try {
+    await prisma.schedule.create({
+      data: {
+        lab_room: data.lab_room,
+        date: data.date,
+        schedule: data.schedule,
+        course_code: data.course_code,
+        section: data.section,
+        professor_name: data.professor_name,
+      },
+    });
+    return { success: true, message: "Class schedule created successfully." };
+  } catch (error) {
+    console.error("Create schedule error:", error);
+    return { success: false, message: "Failed to create the schedule." };
+  }
+}
+
+export async function updateSchedule(id: number, data: {
+  lab_room: string;
+  date: string;
+  schedule: string;
+  course_code: string;
+  section: string;
+  professor_name: string;
+}) {
+  try {
+    await prisma.schedule.update({
+      where: { id: id },
+      data: {
+        lab_room: data.lab_room,
+        date: data.date,
+        schedule: data.schedule,
+        course_code: data.course_code,
+        section: data.section,
+        professor_name: data.professor_name,
+      },
+    });
+    return { success: true, message: "Class schedule updated successfully." };
+  } catch (error) {
+    console.error("Update schedule error:", error);
+    return { success: false, message: "Failed to update the schedule." };
+  }
+}
+
+export async function deleteSchedule(id: number) {
+  try {
+    await prisma.schedule.delete({
+      where: { id: id },
+    });
+    return { success: true, message: "Class schedule deleted successfully." };
+  } catch (error) {
+    console.error("Delete schedule error:", error);
+    return { success: false, message: "Failed to delete the schedule." };
+  }
+}
+
+export async function manualAttendanceOverride(data: {
+  studentId: string;
+  scheduleId: number;
+  status: string;
+}) {
+  try {
+    const student = await prisma.student.findUnique({
+      where: { student_id: data.studentId },
+    });
+
+    if (!student) {
+      return { success: false, message: "Student ID not found in the database." };
+    }
+
+    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+    const existingLog = await prisma.attendanceLog.findFirst({
+      where: {
+        student_id: data.studentId,
+        schedule_id: data.scheduleId,
+        timestamp: {
+          gte: twelveHoursAgo
+        }
+      }
+    });
+
+    if (existingLog) {
+      return { success: false, message: "Student already has an attendance record for this session." };
+    }
+
+    await prisma.attendanceLog.create({
+      data: {
+        student_id: data.studentId,
+        schedule_id: data.scheduleId,
+        status: data.status,
+        signature: "MANUAL_ADMIN_OVERRIDE", 
+      },
+    });
+
+    return { success: true, message: `Manual override successful. Student marked as ${data.status.replace("_", " ")}.` };
+  } catch (error) {
+    console.error("Manual override error:", error);
+    return { success: false, message: "Server error during manual override." };
+  }
+}
