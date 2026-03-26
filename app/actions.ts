@@ -564,3 +564,23 @@ export async function manualAttendanceOverride(data: {
     return { success: false, message: "Server error during manual override." };
   }
 }
+
+export async function checkRevokedStatus(studentId: string) {
+  try {
+    const student = await prisma.student.findUnique({
+      where: { student_id: studentId }
+    });
+    
+    // If the student exists and their key is blank, they are in recovery mode
+    if (student && student.public_key === "") {
+      return { 
+        isRevoked: true, 
+        firstName: student.first_name, 
+        lastName: student.last_name 
+      };
+    }
+    return { isRevoked: false };
+  } catch (error) {
+    return { isRevoked: false };
+  }
+}
