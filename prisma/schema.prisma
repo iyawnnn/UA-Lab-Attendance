@@ -14,12 +14,13 @@ model Admin {
 }
 
 model Student {
-  id          Int             @id @default(autoincrement())
-  student_id  String          @unique
-  first_name  String
-  last_name   String
-  public_key  String          @db.Text
-  attendances AttendanceLog[]
+  id           Int             @id @default(autoincrement())
+  student_id   String          @unique
+  first_name   String
+  last_name    String
+  public_key   String          @db.Text
+  recovery_pin String          
+  attendances  AttendanceLog[]
 }
 
 model Schedule {

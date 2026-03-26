@@ -1,6 +1,7 @@
 "use server";
 
 import { PrismaClient } from '@prisma/client';
+import bcrypt from "bcryptjs";
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 const prisma = globalForPrisma.prisma || new PrismaClient();
@@ -28,24 +29,64 @@ export async function registerStudentToDatabase(data: {
   firstName: string;
   lastName: string;
   publicKey: string;
+  recoveryPin: string;
 }) {
   try {
+    const existingStudent = await prisma.student.findUnique({
+      where: { student_id: data.studentId },
+    });
+
+    if (existingStudent) {
+      return { success: false, message: "Student ID is already registered to a device." };
+    }
+
+    // Hash the PIN before saving to database
+    const salt = await bcrypt.genSalt(10);
+    const hashedPin = await bcrypt.hash(data.recoveryPin, salt);
+
     await prisma.student.create({
       data: {
         student_id: data.studentId,
         first_name: data.firstName,
         last_name: data.lastName,
         public_key: data.publicKey,
+        recovery_pin: hashedPin,
       },
     });
-    return { success: true, message: "Student securely registered in the database." };
+
+    return { success: true, message: "Student registered successfully." };
   } catch (error) {
-    const err = error as { code?: string };
-    if (err.code === 'P2002') {
-      return { success: false, message: "This Student ID is already registered." };
-    }
-    console.error(error); 
+    console.error("Database error:", error);
     return { success: false, message: "Failed to connect to the database." };
+  }
+}
+
+export async function recoverStudentDevice(studentId: string, pin: string) {
+  try {
+    const student = await prisma.student.findUnique({
+      where: { student_id: studentId }
+    });
+
+    if (!student) {
+      return { success: false, message: "Student ID not found in the system." };
+    }
+
+    const isPinValid = await bcrypt.compare(pin, student.recovery_pin);
+
+    if (!isPinValid) {
+      return { success: false, message: "Incorrect Recovery PIN." };
+    }
+
+    // PIN is correct, delete the old record so they can register their new phone
+    await prisma.student.delete({
+      where: { student_id: studentId }
+    });
+
+    return { success: true, message: "Device access revoked. You may now register your new device." };
+
+  } catch (error) {
+    console.error("Recovery error:", error);
+    return { success: false, message: "Failed to process recovery request." };
   }
 }
 
@@ -63,6 +104,20 @@ export async function getLabRooms() {
   }
 }
 
+// Helper function to convert "07:30 AM" into minutes for easy math comparison
+function convertTimeToMinutes(timeStr: string) {
+  const [time, modifier] = timeStr.trim().split(" ");
+  let [hours, minutes] = time.split(":").map(Number);
+  
+  if (hours === 12) {
+    hours = modifier === "AM" ? 0 : 12;
+  } else if (modifier === "PM") {
+    hours += 12;
+  }
+  
+  return hours * 60 + minutes;
+}
+
 export async function submitAttendance(data: {
   studentId: string;
   labRoom: string;
@@ -71,94 +126,116 @@ export async function submitAttendance(data: {
 }) {
   try {
     const student = await prisma.student.findUnique({
-      where: { student_id: data.studentId }
+      where: { student_id: data.studentId },
     });
 
     if (!student) {
-      return { success: false, message: "Student not found. Please register your device first." };
+      return { success: false, message: "Student not found in the database. Please register." };
     }
 
-    const publicKeyArray = Uint8Array.from(atob(student.public_key), c => c.charCodeAt(0));
-    const importedPublicKey = await globalThis.crypto.subtle.importKey(
+    // 1. Cryptographic Verification (Your existing security)
+    const encoder = new TextEncoder();
+    const encodedMessage = encoder.encode(`${data.studentId}-${data.labRoom}-${data.timestamp}`);
+    
+    const binarySignature = new Uint8Array(atob(data.signature).split("").map(c => c.charCodeAt(0)));
+    const binaryPublicKey = new Uint8Array(atob(student.public_key).split("").map(c => c.charCodeAt(0)));
+
+    const importedPublicKey = await crypto.subtle.importKey(
       "spki",
-      publicKeyArray,
+      binaryPublicKey,
       { name: "ECDSA", namedCurve: "P-256" },
       true,
       ["verify"]
     );
 
-    const signedMessage = `${data.studentId}-${data.labRoom}-${data.timestamp}`;
-    const encoder = new TextEncoder();
-    const messageData = encoder.encode(signedMessage);
-    const signatureArray = Uint8Array.from(atob(data.signature), c => c.charCodeAt(0));
-
-    const isValid = await globalThis.crypto.subtle.verify(
+    const isValid = await crypto.subtle.verify(
       { name: "ECDSA", hash: { name: "SHA-256" } },
       importedPublicKey,
-      signatureArray,
-      messageData
+      binarySignature,
+      encodedMessage
     );
 
-    if (!isValid) return { success: false, message: "Security Error: Invalid digital signature." };
+    if (!isValid) {
+      return { success: false, message: "Digital signature verification failed." };
+    }
 
-    const timestampDate = new Date(data.timestamp);
-    const currentDay = timestampDate.toLocaleDateString("en-US", { weekday: "long" });
-    const currentMinutes = timestampDate.getHours() * 60 + timestampDate.getMinutes();
-
-    const roomSchedules = await prisma.schedule.findMany({
-      where: { lab_room: data.labRoom, date: currentDay }
+    // 2. Time-Fencing Logic (Philippine Standard Time)
+    const now = new Date();
+    const phTimeFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Manila',
+      weekday: 'long',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: false
     });
 
-    let activeScheduleId = null;
-    let isLate = false;
+    const timeParts = phTimeFormatter.formatToParts(now);
+    let currentDay = "";
+    let currentHour = 0;
+    let currentMinute = 0;
 
-    for (const sched of roomSchedules) {
-      const times = sched.schedule.split("-");
-      const startMinutes = parseTimeInMinutes(times[0]);
-      const endMinutes = parseTimeInMinutes(times[1]);
+    for (const part of timeParts) {
+      if (part.type === 'weekday') currentDay = part.value;
+      if (part.type === 'hour') currentHour = parseInt(part.value);
+      if (part.type === 'minute') currentMinute = parseInt(part.value);
+    }
 
-      if (currentMinutes >= startMinutes - 30 && currentMinutes <= endMinutes) {
-        activeScheduleId = sched.id;
-        if (currentMinutes > startMinutes + 15) isLate = true;
+    const currentMinutesSinceMidnight = (currentHour * 60) + currentMinute;
+
+    // Fetch schedules for this specific room and today's day
+    const activeSchedules = await prisma.schedule.findMany({
+      where: {
+        lab_room: data.labRoom,
+        date: currentDay
+      }
+    });
+
+    let matchedScheduleId = null;
+    let attendanceStatus = "ON_TIME";
+
+    for (const sched of activeSchedules) {
+      const [startStr, endStr] = sched.schedule.split(" - ");
+      const classStartMins = convertTimeToMinutes(startStr);
+      const classEndMins = convertTimeToMinutes(endStr);
+
+      // We allow them to log in 15 minutes before the class starts
+      const allowedStartMins = classStartMins - 15;
+
+      if (currentMinutesSinceMidnight >= allowedStartMins && currentMinutesSinceMidnight <= classEndMins) {
+        matchedScheduleId = sched.id;
+        
+        // If they log in 16 or more minutes after the class start time, mark as late
+        if (currentMinutesSinceMidnight > (classStartMins + 15)) {
+          attendanceStatus = "LATE";
+        }
         break;
       }
     }
 
-    if (!activeScheduleId) return { success: false, message: "There is no active class in this lab room right now." };
+    if (!matchedScheduleId) {
+      return { 
+        success: false, 
+        message: "Error: No active class session found for you in this room at this current time." 
+      };
+    }
 
-    const todayStart = new Date(timestampDate);
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(timestampDate);
-    todayEnd.setHours(23, 59, 59, 999);
-
-    const existingLog = await prisma.attendanceLog.findFirst({
-      where: {
-        student_id: data.studentId,
-        schedule_id: activeScheduleId,
-        timestamp: { gte: todayStart, lte: todayEnd }
-      }
-    });
-
-    if (existingLog) return { success: false, message: "You have already logged your attendance for this class today." };
-
-    const attendanceStatus = isLate ? "LATE" : "ON_TIME";
-
+    // 3. Save the Verified and Time-Checked Record
     await prisma.attendanceLog.create({
       data: {
         student_id: data.studentId,
-        schedule_id: activeScheduleId,
-        timestamp: timestampDate,
+        schedule_id: matchedScheduleId,
         status: attendanceStatus,
-        signature: data.signature,
-      }
+      },
     });
 
-    const statusMessage = isLate ? "Attendance logged successfully, but you are marked as LATE." : "Attendance securely verified and logged on time!";
-    return { success: true, message: statusMessage };
+    return { 
+      success: true, 
+      message: `Attendance securely recorded. Status: ${attendanceStatus}` 
+    };
 
   } catch (error) {
-    console.error(error);
-    return { success: false, message: "An error occurred on the server." };
+    console.error("Attendance submission error:", error);
+    return { success: false, message: "Server error while processing attendance." };
   }
 }
 
