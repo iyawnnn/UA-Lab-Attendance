@@ -7,6 +7,7 @@ import {
   getLabRooms,
   submitAttendance,
   recoverStudentDevice,
+  checkRevokedStatus,
 } from "../actions";
 
 export default function SmartStudentPortal() {
@@ -26,6 +27,7 @@ export default function SmartStudentPortal() {
 
   const [message, setMessage] = useState("");
   const [isError, setIsError] = useState(false);
+  const [isNameLocked, setIsNameLocked] = useState(false);
 
   useEffect(() => {
     async function initialize() {
@@ -44,6 +46,23 @@ export default function SmartStudentPortal() {
     const response = await getLabRooms();
     if (response.success) {
       setLabRooms(response.data);
+    }
+  }
+
+  async function handleIdCheck() {
+    if (studentId.length >= 4) {
+      const response = await checkRevokedStatus(studentId);
+      if (response.isRevoked) {
+        setFirstName(response.firstName || "");
+        setLastName(response.lastName || "");
+        setIsNameLocked(true); // Lock the fields
+        setMessage(
+          "Account found. Please enter a new PIN to register this device.",
+        );
+        setIsError(false);
+      } else {
+        setIsNameLocked(false); // Unlock for new users
+      }
     }
   }
 
@@ -151,14 +170,17 @@ export default function SmartStudentPortal() {
 
         if (
           response.message.includes("Student not found") ||
-          response.message.includes("DEVICE_REVOKED")
+          response.message.includes("DEVICE_REVOKED") ||
+          response.message.includes("Digital signature verification failed")
         ) {
           await del("student_private_key");
           await del("student_id");
           setTimeout(() => {
             setView("register");
             setIsError(false);
-            setMessage("Device reset detected. Please register again.");
+            setMessage(
+              "Security key mismatch detected. Please register this device again.",
+            );
           }, 2500);
         }
       }
@@ -235,22 +257,25 @@ export default function SmartStudentPortal() {
                 className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 outline-none"
                 value={studentId}
                 onChange={(e) => setStudentId(e.target.value)}
+                onBlur={handleIdCheck}
                 required
               />
               <input
                 type="text"
                 placeholder="First Name"
-                className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 outline-none"
+                className={`w-full px-4 py-3 rounded-lg border outline-none ${isNameLocked ? "bg-gray-200 text-gray-500 cursor-not-allowed border-transparent" : "bg-gray-50 border-gray-200"}`}
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
+                disabled={isNameLocked}
                 required
               />
               <input
                 type="text"
                 placeholder="Last Name"
-                className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 outline-none"
+                className={`w-full px-4 py-3 rounded-lg border outline-none ${isNameLocked ? "bg-gray-200 text-gray-500 cursor-not-allowed border-transparent" : "bg-gray-50 border-gray-200"}`}
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
+                disabled={isNameLocked}
                 required
               />
               <input
