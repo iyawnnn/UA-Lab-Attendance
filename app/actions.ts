@@ -194,7 +194,8 @@ export async function registerAdminToDatabase(data: {
   setupCode: string;
 }) {
   try {
-    if (data.setupCode !== "master-admin-setup") {
+    // Check against the secure environment variable
+    if (data.setupCode !== process.env.ADMIN_SETUP_SECRET) {
       return { success: false, message: "Invalid setup authorization code." };
     }
 
