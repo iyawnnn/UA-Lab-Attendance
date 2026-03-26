@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { get, set } from "idb-keyval";
+import { get, set, del } from "idb-keyval";
 import { registerStudentToDatabase, getLabRooms, submitAttendance } from "../actions";
+
 
 export default function SmartStudentPortal() {
   // Navigation State
@@ -129,11 +130,24 @@ export default function SmartStudentPortal() {
         signature: signatureBase64
       });
 
-      if (response.success) {
+if (response.success) {
         setMessage(response.message);
       } else {
         setIsError(true);
         setMessage(response.message);
+        
+        // If the server says the student is missing from the database, 
+        // clear the browser vault and send them back to the register screen.
+        if (response.message.includes("Student not found")) {
+          await del("student_private_key");
+          await del("student_id");
+          
+          setTimeout(() => {
+            setView("register");
+            setIsError(false);
+            setMessage("Device reset detected. Please register again.");
+          }, 2500);
+        }
       }
     } catch (error) {
       console.error(error);
